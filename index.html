@@ -15,6 +15,9 @@
     image-rendering:-moz-crisp-edges; background:#0b0b10; border-radius:6px; }
   .ov { position:absolute; pointer-events:none; text-shadow:0 2px 0 rgba(0,0,0,.9); }
   #obj { left:8px; top:6px; font-size:15px; font-weight:600; color:#f0d48a; }
+  #toast { left:50%; transform:translateX(-50%); bottom:44px; max-width:90%; width:max-content;
+    padding:4px 12px; border-radius:10px; background:rgba(8,8,12,.6); text-align:center;
+    font-size:14px; font-weight:600; color:#fff; opacity:0; transition:opacity .3s; }
   #statusbar { display:flex; align-items:center; justify-content:space-between; padding:6px 2px 0;
     font-size:16px; font-weight:600; color:#cfd9ee; font-variant-numeric:tabular-nums; }
   #statusbar .sp { width:74px; }
@@ -190,7 +193,14 @@ function region(tx,ty){
   return dy>0?2:0;
 }
 
-const cv = document.getElementById('game'), ctx = cv.getContext('2d');
+const cv = document.getElementById('game');
+(function fitCanvas(){
+  // 조작 버튼·상태줄이 차지하는 높이를 뺀 나머지를 게임 화면에 준다 (가로 352는 고정)
+  const cssW=Math.min(innerWidth-12, 608), reserve=300;
+  const cssH=Math.max(cssW*256/352, Math.min(innerHeight-reserve, cssW*1.5));
+  cv.height=Math.max(256, Math.min(528, Math.round(352*cssH/cssW)));
+})();
+const ctx = cv.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 const VW = cv.width, VH = cv.height;
 
@@ -704,9 +714,26 @@ function onRescued(){
   monster.lk=w2t(player.x,player.y);
   monster.path=astar(w2t(monster.x,monster.y),monster.lk); monster.pi=0;
   sRoar(); shake=1.2;
-  setObj('열쇠 조각을 모아라 ('+player.frags+'/'+FRAGMENTS+')');
-  toast('괴물이 깨어났다! 상자에서 열쇠 조각을 찾아라');
   resupply('미로 곳곳에 물자가 다시 나타났다');
+  if(player.frags>=FRAGMENTS){
+    // 조각을 먼저 다 모아 둔 경우 — 바로 탈출 단계로
+    phase='escape'; exitOpen=true; player.key=true;
+    setObj('출구로 탈출하라'); toast('괴물이 깨어났다! 공주를 데리고 출구로!');
+  }else{
+    setObj('열쇠 조각을 모아라 ('+player.frags+'/'+FRAGMENTS+')');
+    toast('괴물이 깨어났다! 상자에서 열쇠 조각을 찾아라');
+  }
+}
+// 걸어서 가장 가까운 안 연 상자. 플레이어가 칸을 옮길 때만 다시 계산한다.
+let _nc={tile:'',ver:-1,chest:null};
+function nextChestTarget(){
+  const pt=w2t(player.x,player.y), k=pt.join(','), ver=chests.filter(c=>c.opened).length;
+  if(_nc.tile===k && _nc.ver===ver && (!_nc.chest||!_nc.chest.opened)) return _nc.chest;
+  const d=bfs(pt); let best=null, bd=1e9;
+  for(const c of chests){ if(c.opened) continue; const v=d[c.tx][c.ty]; if(v>=0&&v<bd){bd=v;best=c;} }
+  // 살짝 더 가까운 상자가 생겨도 1칸 이내 차이면 원래 목표를 유지 (깜빡임 방지)
+  if(_nc.chest && !_nc.chest.opened && best!==_nc.chest){ const v=d[_nc.chest.tx][_nc.chest.ty]; if(v>=0 && v<=bd+1) best=_nc.chest; }
+  _nc={tile:k,ver:ver,chest:best}; return best;
 }
 function chestNear(){
   const [tx,ty]=w2t(player.x,player.y);
@@ -726,8 +753,10 @@ function onFragment(){
 function resupply(msg){
   const open=[]; for(let x=0;x<GW;x++) for(let y=0;y<GH;y++) if(!wall[x][y]) open.push([x,y]);
   const ds=bfs(w2t(player.x,player.y));
-  const cand=open.filter(t=>ds[t[0]][t[1]]>8 && region(t[0],t[1])!==4
-    && !pits.some(q=>q.tx===t[0]&&q.ty===t[1]));
+  const taken=new Set([exitT[0]+','+exitT[1],
+    ...pits.map(q=>q.tx+','+q.ty), ...chests.map(c=>c.tx+','+c.ty), ...planks.map(q=>q.tx+','+q.ty),
+    ...pickups.map(p=>w2t(p.x,p.y).join(','))]);
+  const cand=open.filter(t=>ds[t[0]][t[1]]>8 && region(t[0],t[1])!==4 && !taken.has(t[0]+','+t[1]));
   for(const [kind,cnt] of [['planks',2],['bolts',1],['meat',1]])
     for(let i=0;i<cnt&&cand.length;i++){
       const t=cand.splice((Math.random()*cand.length)|0,1)[0];
@@ -747,7 +776,7 @@ function showResult(ok){
   const sc=document.getElementById('screen');
   sc.innerHTML = '<h2 style="color:'+(ok?'#8ce8b0':'#ff7a80')+'">'+(ok?'탈 출 성 공':'잡 혔 다')+'</h2>'+
     '<p>'+(ok?'클리어 타임':'생존 시간')+' <b style="color:#f0d48a">'+runTime.toFixed(2)+'초</b></p>'+
-    '<p style="color:#8a8478">유니티판은 여기서 이름 3글자를 입력해<br>최고기록판에 올립니다</p>'+
+    '<p style="color:#8a8478">'+(ok?'공주를 무사히 구해냈다!':'목재로 길을 막고, 미끼로 괴물을 따돌려 보자')+'</p>'+
     '<div class="btn go" id="againBtn">다시 하기</div>';
   sc.classList.remove('hide');
   document.getElementById('againBtn').onclick=start;
@@ -929,7 +958,7 @@ function update(dt){
     const d=darts[i];
     d.x+=d.vx*dt; d.y+=d.vy*dt; d.life-=dt;
     const [tx,ty]=w2t(d.x,d.y);
-    if(d.life<=0||isWall(tx,ty)){ darts.splice(i,1); continue; }
+    if(d.life<=0||isWall(tx,ty)||plankAt(tx,ty)){ darts.splice(i,1); continue; }   // 조준선과 같은 규칙
     if(Math.hypot(d.x-monster.x,d.y-monster.y)<8*K){
       darts.splice(i,1);
       monster.state='stun'; monster.stun=STUN; monster.path=[]; monster.plank=null;
@@ -999,6 +1028,7 @@ function checkRegion(){
 function updateMonster(dt){
   const M=monster;
   if(M.state==='dormant') return;
+  if(M.summoned>0) M.summoned-=dt;            // 호출 가속은 6초만 (보고 있든 아니든)
   if(M.stagger>0){ M.stagger-=dt; return; }
 
   // 미끼를 먹는 중 — 플레이어를 완전히 무시한다
@@ -1051,7 +1081,7 @@ function updateMonster(dt){
     M.lk=pt; M.lost=0;
     if(M.state!=='chase'&&M.state!=='break'){ M.state='chase'; M.repath=0; M.tired=0; }
   } else if(M.state==='chase'){
-    if(M.summoned>0){ M.summoned-=dt; M.lost=0; M.lk=pt; }
+    if(M.summoned>0){ M.lost=0; M.lk=pt; }
     M.lost+=dt;
     if(M.lost>=1.8){ M.state='search'; M.tired=0; M.path=astar(mt,M.lk); M.pi=0; }
   }
@@ -1437,8 +1467,7 @@ function drawHUD(){
     ctx.fillStyle='#000'; ctx.fillRect(mx+q.tx*S,my+q.ty*S,S,S); }
   if(seen[exitT[0]][exitT[1]]||phase==='escape'){ ctx.fillStyle=exitOpen?'#8ce8b0':'#b05050';
     ctx.fillRect(mx+exitT[0]*S-1,my+exitT[1]*S-1,S+2,S+2); }
-  const nextChest=chests.filter(c=>!c.opened)
-    .sort((a,b)=>Math.hypot(a.tx*T-player.x,a.ty*T-player.y)-Math.hypot(b.tx*T-player.x,b.ty*T-player.y))[0];
+  const nextChest=nextChestTarget();
   const goal = phase==='bow'? (pickups.find(p=>p.s==='crossbow')||null)
              : phase==='rescue'? {x:hostage.x,y:hostage.y}
              : (hostage.rescued&&!hostage.following)? {x:hostage.x,y:hostage.y}

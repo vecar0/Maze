@@ -48,6 +48,17 @@
 
 미로는 판마다 새로 생성됩니다. 막다른 길이 없고, 구덩이는 항상 옆으로 돌아갈 수 있는 자리에만 놓입니다.
 
+## 자동 검수
+
+```
+pip install playwright && playwright install chromium
+python3 tests/qa.py        # 로직 시뮬레이션 53개 + 브라우저 실제 플레이 32개
+```
+
+미로 200판 생성 검사, 단계 진행, 구출·도구·구덩이 규칙, 무적 봇 120판 완주, 무작위 입력 5분,
+휴대폰 화면 터치 조작, 결과 화면, 레이아웃, 콘솔 에러 0을 확인합니다.
+고친 내용과 이유는 `tests/progress.txt`에 남겨 두었습니다.
+
 ## 파일 구성
 
 ```
@@ -55,6 +66,7 @@ index.html      게임 전체 (그래픽·효과음 포함, 이 파일 하나로
 art/sprites/    캐릭터·아이템 도트 스프라이트
 art/tiles/      구역별 벽·바닥 타일 (32×32)
 assets/         README 미리보기
+tests/          자동 검수 (qa.py · sim.js · ui.py · progress.txt)
 ```
 
 ## 제작
