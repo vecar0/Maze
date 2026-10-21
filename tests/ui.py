@@ -48,8 +48,15 @@ def ui_tests(browser, url, seeded_random, out_dir):
     page.screenshot(path=str(out_dir / 'ui_1_title.png'))
 
     # ── B3 시작 ──
-    page.tap('#startBtn'); frames(6)
-    ok('B3 시작 버튼을 탭하면 게임 시작', ev("phase") == 'bow' and ev("document.getElementById('screen').classList.contains('hide')"))
+    page.tap('#startBtn'); frames(6); time.sleep(0.3)
+    ok('B3a 시작 버튼 → 도입 장면이 뜨고 게임은 아직 시작 안 함',
+       ev("!document.getElementById('intro').classList.contains('hide')") and ev("phase") == 'title',
+       ev("document.getElementById('introLine').textContent"))
+    page.screenshot(path=str(out_dir / 'ui_1b_intro.png'))
+    l0 = ev("introI"); page.tap('#introLine'); time.sleep(0.3)
+    ok('B3b 화면을 누르면 다음 문장으로 넘어감', ev("introI") == l0 + 1, f'{l0} → {ev("introI")}')
+    page.tap('#introSkip'); frames(6)
+    ok('B3 건너뛰기를 누르면 게임 시작', ev("phase") == 'bow' and ev("document.getElementById('screen').classList.contains('hide')"))
     lum = ev("""(()=>{const c=document.getElementById('game'),g=c.getContext('2d');
        const d=g.getImageData(0,0,c.width,c.height).data;let s=0,s2=0,n=0;
        for(let i=0;i<d.length;i+=16){const v=(d[i]+d[i+1]+d[i+2])/3;s+=v;s2+=v*v;n++;}
@@ -176,11 +183,44 @@ def ui_tests(browser, url, seeded_random, out_dir):
     txt2 = page.locator('#screen').inner_text()
     page.screenshot(path=str(out_dir / 'ui_6_clear.png'))
     ok('B26 공주와 출구 도착 → "탈출 성공" 결과 화면', ev("phase") == 'cleared' and '탈' in txt2, txt2.replace('\n', ' ')[:40])
+    ok('B26b 결과 화면에 판 기록(맞은 횟수·화살·구덩이)이 나옴', '맞은 횟수' in txt2 and '구덩이' in txt2)
+    has_in = page.locator('#nameIn').count() == 1
+    if has_in:
+        page.fill('#nameIn', 'QA1'); page.tap('#nameBtn'); frames(2)
+    lb = ev("lbLoad()")
+    ok('B26c 클리어하면 이름 3글자로 순위표에 등록 · 제목 화면에 최고 기록 표시',
+       has_in and any(e['n'] == 'QA1' for e in lb) and page.locator('.lbR.me').count() == 1, lb[:2])
     page.tap('#againBtn'); frames(4)
 
+    # ── B30 단계 안내 배너 ──
+    ev("monster.state='dormant'; monster.x=-1e6; onBow(2);"); frames(3)
+    ok('B30 단계가 바뀌면 큰 안내 배너가 뜸', ev("document.getElementById('banner').classList.contains('show')")
+       and '공주' in ev("document.getElementById('banner').textContent"), ev("document.getElementById('banner').textContent"))
+
+    # ── B31 연출 입자 수 상한 ──
+    n = ev("(()=>{ for(let i=0;i<200;i++){ fxHit(); fxStun(); fxWin(); } for(let i=0;i<30;i++) fxUpdate(1/60);"
+           " return [FX.parts.length, FX.floats.length, FX.flyers.length, FX.amb.length]; })()")
+    ok('B31 효과 입자가 아무리 많이 터져도 상한 이하 (입자 500 · 글자 41 · 조각 9 · 배경 70)',
+       n[0] <= 500 and n[1] <= 41 and n[2] <= 9 and n[3] <= 70, n)
+    ev("fxReset()")
+
+    # ── B32 소리 끄기 저장 ──
+    m0 = ev("muted"); page.tap('#muteBtn'); frames(1)
+    m1 = ev("muted"); saved = ev("localStorage.getItem('maze_mute')")
+    page.tap('#muteBtn'); frames(1)
+    ok('B32 소리 버튼: 켜고 끄기 · 기기에 저장', m0 is False and m1 is True and saved == '1' and ev("muted") is False
+       and ev("localStorage.getItem('maze_mute')") == '0', f'{m0}→{m1} 저장={saved}')
+    page.tap('#muteBtn'); frames(1)
+    page.reload(); page.wait_for_function("document.getElementById('startBtn').textContent==='시작'", timeout=20000)
+    best = ev("document.getElementById('bestLine').textContent")
+    ok('B33 새로고침 뒤에도 최고 기록이 제목 화면에 · 소리 꺼짐 상태 유지',
+       'QA1' in best and ev("muted") is True and ev("document.getElementById('muteBtn').textContent") == '🔇', best)
+    page.tap('#muteBtn'); ev("start()"); frames(2)
+
     # ── B27 성능: 한 프레임(update+draw) 시간 ──
-    ms = ev("""(()=>{const t=performance.now(); for(let i=0;i<300;i++){ update(1/60); draw(); } return (performance.now()-t)/300;})()""")
-    ok('B27 한 프레임 처리 시간 < 8ms (60fps 여유)', ms < 8, f'{ms:.2f}ms')
+    ms = ev("""(()=>{ for(let i=0;i<20;i++) fxHit();
+        const t=performance.now(); for(let i=0;i<300;i++){ update(1/60); fxUpdate(1/60); musicTick(); draw(); } return (performance.now()-t)/300;})()""")
+    ok('B27 한 프레임 처리(규칙+연출+조명+그리기) 시간 < 8ms (60fps 여유)', ms < 8, f'{ms:.2f}ms')
 
     # ── B28 PC 키보드 ──
     desk = browser.new_context(viewport={'width': 1280, 'height': 900})
@@ -189,7 +229,7 @@ def ui_tests(browser, url, seeded_random, out_dir):
     dp.on('console', lambda m: m.type in ('error', 'warning') and dlogs.append(m.text))
     dp.add_init_script(seeded_random)
     dp.goto(url); dp.wait_for_function("document.getElementById('startBtn').textContent==='시작'", timeout=20000)
-    dp.click('#startBtn'); time.sleep(0.2)
+    dp.click('#startBtn'); time.sleep(0.2); dp.click('#introSkip'); time.sleep(0.2)
     dp.evaluate("monster.state='dormant'; monster.x=-1e6;")
     kd = dp.evaluate("""(()=>{const [tx,ty]=w2t(player.x,player.y);
         for(const [dx,dy,k] of [[1,0,'d'],[-1,0,'a'],[0,1,'s'],[0,-1,'w']]) if(!isWall(tx+dx,ty+dy)) return [dx,dy,k];})()""")
