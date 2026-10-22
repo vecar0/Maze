@@ -346,6 +346,31 @@ function botPlay(maxSec, opts){
     }
   }
   ok('T1 목표 상자 표시가 걷는 도중 바뀌지 않음 (20판)', flips === 0, flips + '회');
+  // T2: 새 판에서 지난 판의 '다음 상자'가 남지 않는다 (같은 칸에 서 있어도)
+  let stale = 0;
+  for (let s = 0; s < 20; s++){
+    newGame(7000 + s); sleepMonster();
+    const c = chests[s % 4]; place([c.tx, c.ty]); nextChestTarget();
+    const old = chests;
+    newGame(7100 + s); sleepMonster(); place([c.tx, c.ty]);
+    const t = nextChestTarget();
+    if (t && (old.includes(t) || !chests.includes(t))) stale++;
+  }
+  ok('T2 새 판에서 지난 판의 목표 상자가 남지 않음 (20판)', stale === 0, stale + '회');
+
+  // T3: 움직임 — 벽에 대고 걸으면 걷는 그림이 멈추고, 손을 떼면 바로 선다
+  newGame(7200); sleepMonster(); release();
+  const [wx, wy] = w2t(player.x, player.y);
+  const dirs = [['right',1,0],['left',-1,0],['down',0,1],['up',0,-1]];
+  const wd = dirs.find(d => isWall(wx + d[1], wy + d[2]));
+  held[wd[0]] = 1; secs(1.0);
+  const wallAnim = hunterSprite()[0], wallSpd = player.spd, wallIdle = walkName('hunter', player.fx, player.fy, null)[0];
+  release(); const od = dirs.find(d => !isWall(wx + d[1], wy + d[2]) && !isWall(wx + 2*d[1], wy + 2*d[2])) || dirs.find(d => !isWall(wx + d[1], wy + d[2]));
+  place([wx, wy]); held[od[0]] = 1; secs(0.5); release();
+  const x0 = player.x, y0 = player.y; secs(0.5);
+  const slide = Math.hypot(player.x - x0, player.y - y0);
+  ok('T3 벽에 대고 걸으면 제자리걸음 안 함 · 손 떼면 3px 안에 멈춤', wallSpd < 1 && wallAnim === wallIdle && slide < 3,
+     `벽 앞 속도 ${wallSpd.toFixed(1)} · 그림 ${wallAnim} · 미끄러짐 ${slide.toFixed(1)}px`);
 }
 
 // ════════════════ Z. 무작위 입력 퍼징 ════════════════

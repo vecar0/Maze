@@ -412,13 +412,14 @@ function reset(){
   chests=[]; pits=[]; respawns=[]; curRegion=-1;
   exitOpen=false; keyPickup=null; runTime=0; toastLeft=0; shake=0; flash=0;
   fxReset(); statsReset();
+  _nc={tile:'',ver:-1,chest:null};   // 지난 판의 '다음 상자' 기억을 지운다
 
   seen=[]; for(let x=0;x<GW;x++){seen[x]=[]; for(let y=0;y<GH;y++) seen[x][y]=false;}
 
   const [px,py]=tw(startT[0],startT[1]);
   player={x:px,y:py,r:3.6*K,hp:4,hpMax:4,st:100,run:false,fx:0,fy:1,vx:0,vy:0,
           planks:1,bow:false,ammo:0,bait:1,key:false,frags:0,fall:0,aim:0,
-          inv:0,bob:0,knock:0,kx:0,ky:0};
+          inv:0,bob:0,spd:0,knock:0,kx:0,ky:0};
 
   // 괴물은 플레이어에게서 먼 곳에서 시작
   const ds=bfs(startT); const pool=[];
@@ -994,14 +995,15 @@ function update(dt){
     player.st=Math.min(100,player.st+26*dt);
     return;
   }
+  const ox=player.x, oy=player.y, knocked=player.knock>0;
   if(player.knock>0){
     player.knock-=dt;
     moveP(player.kx*dt, player.ky*dt);
     player.kx*=0.88; player.ky*=0.88;
     player.vx=player.vy=0;
   } else {
-    // 목표 속도로 부드럽게 붙는다 (급정지·급출발 느낌 제거)
-    const k=1-Math.exp(-20*dt);
+    // 목표 속도로 부드럽게 붙는다. 손을 떼면 더 빨리 멈춘다 (멈출 때 미끄러지지 않게)
+    const k=1-Math.exp(-((dx||dy)?20:45)*dt);
     player.vx+=(dx*sp-player.vx)*k;
     player.vy+=(dy*sp-player.vy)*k;
     if(Math.abs(player.vx)<0.5) player.vx=0;
@@ -1010,7 +1012,11 @@ function update(dt){
     centerInCorridor(dt);
   }
 
-  if(dx||dy) player.bob+=dt*(player.run?13:8.5); else player.bob=0;
+  // 걷는 그림은 '실제로 움직인 거리'만큼 넘긴다 — 벽에 막히면 제자리걸음 없이 서 있고,
+  // 속도가 줄면 발걸음도 같이 느려져서 발이 바닥에서 미끄러져 보이지 않는다
+  const moved=Math.hypot(player.x-ox,player.y-oy);
+  player.spd = dt>0 ? moved/dt : 0;
+  if(!knocked && player.spd>12) player.bob+=moved/HUNTER_STRIDE;
   if(player.inv>0) player.inv-=dt;
   if(player.aim>0) player.aim-=dt;
   if(hostage.cool>0) hostage.cool-=dt;
@@ -1439,12 +1445,13 @@ function beastSprite(){
   if(M.state==='eat') return ['beast_eat', false];
   return walkName('beast', M.mx, M.my, Math.floor(M.anim||0));
 }
+const HUNTER_STRIDE=9.5;   // 그림 한 장당 이동 거리(px) — 걷기 약 11.5장/초, 달리기 약 15.5장/초
 function hunterSprite(){
-  const moving=Math.hypot(player.vx,player.vy)>4;
+  const moving=player.spd>12 && !(player.knock>0);
   const side=Math.abs(player.fx)>Math.abs(player.fy)+0.01;
   if(player.aim>0 && side) return ['hunter_aim', player.fx<0];
   // 6프레임이라 예전(4프레임)보다 1.5배 빨리 넘겨 보폭 속도를 맞춘다
-  return walkName('hunter', player.fx, player.fy, moving?Math.floor(player.bob*1.35):null);
+  return walkName('hunter', player.fx, player.fy, moving?Math.floor(player.bob):null);
 }
 
 function draw(){
@@ -1453,6 +1460,8 @@ function draw(){
   camX = Math.max(-T/2, Math.min(GW*T-VW+T/2, camX));
   camY = Math.max(-T/2, Math.min(GH*T-VH+T/2, camY));
   if(shake>0){ camX+=(Math.random()-0.5)*shake*3*K; camY+=(Math.random()-0.5)*shake*3*K; }
+  // 카메라를 정수 픽셀에 맞춘다 — 소수점이면 배경과 캐릭터가 따로 반올림되어 1px씩 떨린다
+  camX=Math.round(camX); camY=Math.round(camY);
 
   ctx.fillStyle='#08080c'; ctx.fillRect(0,0,VW,VH);
   if(phase==='title'||!player||!assetsReady) return;
@@ -1769,9 +1778,9 @@ function fxUpdate(dt){
   const playingNow=playing();
 
   // 카메라: 진행 방향을 살짝 앞질러 부드럽게 따라간다. 순간이동(구덩이·재시작)은 바로 맞춘다.
-  const tx=player.x+player.vx*0.22-VW/2, ty=player.y+player.vy*0.22-VH/2;
+  const tx=player.x+player.vx*0.1-VW/2, ty=player.y+player.vy*0.1-VH/2;
   if(!CAM.ready || Math.hypot(tx-CAM.x,ty-CAM.y)>220){ CAM.x=tx; CAM.y=ty; CAM.ready=true; }
-  else { const k=1-Math.exp(-7*dt); CAM.x+=(tx-CAM.x)*k; CAM.y+=(ty-CAM.y)*k; }
+  else { const k=1-Math.exp(-10*dt); CAM.x+=(tx-CAM.x)*k; CAM.y+=(ty-CAM.y)*k; }
 
   // 구역 어둠 색을 서서히 바꾼다
   const rg=region(...w2t(player.x,player.y)), want=AMBIENT[rg];
@@ -1779,7 +1788,7 @@ function fxUpdate(dt){
 
   if(playingNow){
     // 걸음 먼지 · 발소리
-    const sp=Math.hypot(player.vx,player.vy);
+    const sp=player.spd||0;
     if(sp>20 && player.fall<=0){
       FX.stepAcc+=sp*dt;
       const stride=player.run?30:24;

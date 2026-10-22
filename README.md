@@ -61,7 +61,7 @@
 
 ```
 pip install playwright && playwright install chromium
-python3 tests/qa.py        # 로직 시뮬레이션 53개 + 브라우저 실제 플레이 40개
+python3 tests/qa.py        # 로직 시뮬레이션 55개 + 브라우저 실제 플레이 40개
 ```
 
 미로 200판 생성 검사, 단계 진행, 구출·도구·구덩이 규칙, 무적 봇 120판 완주, 무작위 입력 5분,
