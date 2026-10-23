@@ -323,7 +323,7 @@ const CELLS = 15;             // 15x15칸 = 31x31타일
 const GW = CELLS*2+1, GH = CELLS*2+1;
 const U = T/2;                // 유니티 1유닛 = 16도트
 const SPD_WALK = 6.8*U, SPD_RUN = 9.2*U;      // 괴물과 같은 기본 속도
-const SPD_PATROL = 5.3*U, SPD_SEARCH = 6.2*U, SPD_CHASE = 8.6*U, ENRAGE = 0.25*U;   // 추격: 걷기(6.8)보다 빠르고 달리기(9.2)보다 느리다 → 걸으면 잡히고 달려야 떼어낸다
+const SPD_PATROL = 5.3*U, SPD_SEARCH = 6.2*U, SPD_CHASE = 7.15*U, ENRAGE = 0.25*U;   // 추격: 걷기(6.8)보다 빠르고 달리기(9.2)보다 느리다 → 걸으면 잡히고 달려야 떼어낸다
 const VIEW = 14*U, HEAR = 10*U, HEAR_WALK = 4*U;   // 시야 7칸 · 달리는 소리 5칸 · 걷는 소리 2칸
 const STUN = 8, AMMO = 3, PLANK_HP = 2, PLANK_MAX = 3;
 const BOLT_SPOTS = 3, BOLTS_PER = 2;
@@ -531,7 +531,7 @@ function reset(){
   seen=[]; for(let x=0;x<GW;x++){seen[x]=[]; for(let y=0;y<GH;y++) seen[x][y]=false;}
 
   const [px,py]=tw(startT[0],startT[1]);
-  player={x:px,y:py,r:3.6*K,hp:5,hpMax:5,st:100,run:false,fx:0,fy:1,vx:0,vy:0,
+  player={x:px,y:py,r:3.6*K,hp:3,hpMax:3,st:100,run:false,fx:0,fy:1,vx:0,vy:0,
           planks:1,bow:false,ammo:0,bait:1,key:false,frags:0,fall:0,aim:0,
           inv:0,bob:0,spd:0,knock:0,kx:0,ky:0};
 
@@ -1418,8 +1418,9 @@ function checkPit(){
 function summonMonster(){
   const M=monster;
   M.stun=0; M.eat=0; M.stagger=0; M.plank=null;
-  M.state='chase'; M.summoned=6; M.lost=0; M.tired=0; M.repath=0;
-  M.lk=w2t(hostage.x,hostage.y);
+  // 비명이 난 곳(둥지)으로 달려온다. 오는 길에, 또는 둥지에서 플레이어를 보면 그때 쫓는다.
+  M.state='search'; M.summoned=6; M.lost=0; M.tired=0; M.repath=0;
+  M.lk=w2t(hostage.x,hostage.y); M.path=astar(w2t(M.x,M.y),M.lk); M.pi=0;
   sRoar();
 }
 
@@ -1486,7 +1487,6 @@ function updateMonster(dt){
     M.lk=pt; M.lost=0;
     if(M.state!=='chase'&&M.state!=='break'){ M.state='chase'; M.repath=0; M.tired=0; }
   } else if(M.state==='chase'){
-    if(M.summoned>0){ M.lost=0; M.lk=pt; }
     M.lost+=dt;
     if(M.lost>=3.0){ M.state='search'; M.tired=0; M.path=astar(mt,M.lk); M.pi=0; }
   }
@@ -1540,7 +1540,7 @@ function moveMonster(dt){
   const pl=plankAt(nx[0],nx[1]);
   if(pl){ M.plank=pl; M.state='break'; M.ptimer=0.25; return; }
   const [gx,gy]=tw(nx[0],nx[1]);
-  let sp=(M.state==='chase'?SPD_CHASE:M.state==='search'?SPD_SEARCH:SPD_PATROL)+(M.enraged?ENRAGE:0);
+  let sp=(M.state==='chase'||M.summoned>0?SPD_CHASE:M.state==='search'?SPD_SEARCH:SPD_PATROL)+(M.enraged?ENRAGE:0);
   if(M.summoned>0) sp*=1.08;
   if(M.tired>6) sp*=Math.max(0.80, 1-(M.tired-6)*0.05);   // 8초 넘게 쫓으면 숨이 차서 걷기보다 조금 느려진다
   const ddx=gx-M.x, ddy=gy-M.y, dd=Math.hypot(ddx,ddy);
