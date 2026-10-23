@@ -3,7 +3,8 @@
 
     python3 tests/qa.py          # 시뮬레이션 + 브라우저 테스트 전부
     python3 tests/qa.py sim      # 로직 시뮬레이션만
-    python3 tests/qa.py ui       # 브라우저 실제 플레이만
+    python3 tests/qa.py ui       # 브라우저 실제 플레이만 (휴대폰 + 노트북)
+    python3 tests/qa.py art      # 그림 검사만
 
 index.html 을 로컬 서버로 띄워 Chromium 에서 연다.
 """
@@ -67,7 +68,16 @@ def run_ui(browser, url):
     from ui import ui_tests
     results = ui_tests(browser, url, SEEDED_RANDOM, OUT)
     (OUT / 'ui_results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding='utf-8')
-    return report('B. 브라우저 실제 플레이', results)
+    ok1 = report('B. 브라우저 실제 플레이 (휴대폰 390×844)', results)
+    from laptop import laptop_tests
+    results = laptop_tests(browser, url, SEEDED_RANDOM, OUT)
+    (OUT / 'laptop_results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding='utf-8')
+    return report('C. 노트북 부스 운영 (가로 화면 · 키보드)', results) and ok1
+
+
+def run_art():
+    from art import art_tests
+    return report('D. 그림 검사', art_tests())
 
 
 if __name__ == '__main__':
@@ -80,6 +90,7 @@ if __name__ == '__main__':
         browser = p.chromium.launch()
         if mode in ('all', 'sim'): all_ok &= run_sim(browser, url)
         if mode in ('all', 'ui'):  all_ok &= run_ui(browser, url)
+        if mode in ('all', 'art'): all_ok &= run_art()
         browser.close()
     httpd.shutdown()
     print('\n' + ('🟢 전부 통과' if all_ok else '🔴 실패 있음'))

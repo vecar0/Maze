@@ -174,7 +174,7 @@ def ui_tests(browser, url, seeded_random, out_dir):
     btn = page.locator('#againBtn').bounding_box()
     ok('B24 결과 화면의 "다시 하기" 버튼이 화면 안에 보임', btn and btn['width'] > 40 and 0 <= btn['y'] < 844, btn)
     page.tap('#againBtn'); frames(4)
-    ok('B25 "다시 하기"로 새 판 시작', ev("phase") == 'bow' and ev("player.hp") == 4)
+    ok('B25 "다시 하기"로 새 판 시작', ev("phase") == 'bow' and ev("player.hp") == 5)
 
     # ── B26 클리어 → 결과 화면 ──
     ev("""monster.state='dormant'; monster.x=-1e6; phase='escape'; exitOpen=true; player.key=true; player.frags=4;

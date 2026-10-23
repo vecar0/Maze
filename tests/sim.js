@@ -67,6 +67,67 @@ function botPlay(maxSec, opts){
   return {res: 'timeout', t: runTime, phases};
 }
 
+// ── 피하는 봇 (기획서 G): 괴물이 가까우면 석궁·목재·미끼를 쓰고, 구출 대기 중엔 둥지를 떠나며, 가까운 아이템은 줍는다 ──
+// 피하는 봇: 사람이 할 법한 만큼 도구를 쓴다
+function avoidGoal(){
+  const M=monster, pt=w2t(player.x,player.y);
+  // 구출 대기 중(괴물 호출됨)엔 둥지를 떠나 괴물 반대쪽으로
+  if(!hostage.rescued && hostage.cool>0.8 && (phase==='rescue')){
+    const mt=w2t(M.x,M.y); let best=null,bd=-1;
+    for(const r of respawns){ const d=Math.hypot(r[0]-mt[0],r[1]-mt[1])-0.5*Math.hypot(r[0]-pt[0],r[1]-pt[1]); if(d>bd){bd=d;best=r;} }
+    return best;
+  }
+  // 근처(6칸) 아이템은 주워 간다 (위험하지 않을 때)
+  const md=Math.hypot(M.x-player.x,M.y-player.y)/T;
+  if(md>5 || M.state==='stun' || M.state==='eat'){
+    let bp=null,bd=1e9;
+    for(const p of pickups){ if(p.s==='key') continue;
+      if(p.s==='planks'&&player.planks>=PLANK_MAX) continue; if(p.s==='meat'&&player.bait>=BAIT_MAX) continue;
+      const d=Math.hypot(p.x-player.x,p.y-player.y)/T; if(d<6&&d<bd){bd=d;bp=p;} }
+    if(bp) return w2t(bp.x,bp.y);
+  }
+  return botGoal();
+}
+function avoidAct(){
+  const M=monster, md=Math.hypot(M.x-player.x,M.y-player.y)/T;
+  if(M.state==='stun'||M.state==='eat'||M.state==='dormant') return;
+  const chasing = M.state==='chase'||M.state==='break';
+  if(!chasing || md>4.5) return;
+  const pt=w2t(player.x,player.y), mt=w2t(M.x,M.y);
+  if(player.bow && player.ammo>0 && los(pt,mt) && (pt[0]===mt[0]||pt[1]===mt[1]) && md<5){
+    const fx=player.fx, fy=player.fy;
+    player.fx=Math.sign(mt[0]-pt[0]); player.fy=Math.sign(mt[1]-pt[1]); tapped.fire=1; return;
+  }
+  const away = (player.fx*(M.x-player.x)+player.fy*(M.y-player.y)) < 0;   // 괴물이 등 뒤
+  if(player.planks>0 && away && md<3){ tapped.plank=1; return; }
+  if(player.bait>0 && md<2.5){ tapped.bait=1; return; }
+}
+function avoidPlay(maxSec){
+  let rel=0, phases=[phase], minHp=player.hp, mark=[player.x,player.y], wander=0, wgoal=null;
+  for (let f = 0; f < maxSec * 60; f++){
+    // 3초 동안 1칸도 못 움직였으면 (막힘) 2초간 아무 곳으로
+    if (f % 180 === 0){
+      const waiting = !hostage.rescued && Math.hypot(hostage.x-player.x,hostage.y-player.y)<T*1.5 && hostage.cool<=0;
+      if (!waiting && Math.hypot(player.x-mark[0],player.y-mark[1]) < T){ wander=120; wgoal=rndOpen(); }
+      mark=[player.x,player.y];
+    }
+    if (f % 6 === 0){
+      const g = wander>0 ? wgoal : avoidGoal(); if (g) steerTo(g);
+      held.run = player.st>25 || Math.hypot(monster.x-player.x,monster.y-player.y)<T*6 ? 1 : 0;
+      avoidAct();
+    }
+    // 구출 대기 중엔 버튼을 누르지 않는다
+    const waitRescue = !hostage.rescued && hostage.cool>0;
+    if (hostage.locked) rel = 4;
+    if (rel > 0 || waitRescue) { usePressed = false; if(rel>0) rel--; } else usePressed = true;
+    update(DT); if(wander>0) wander--;
+    minHp=Math.min(minHp,player.hp);
+    if (phases[phases.length-1] !== phase) phases.push(phase);
+    if (phase === 'cleared' || phase === 'over') return {res: phase, t: runTime, phases, hits:stats.hits, falls:stats.falls};
+  }
+  return {res: 'timeout', t: runTime, phases, hits:stats.hits, falls:stats.falls};
+}
+
 // ════════════════ G. 미로 생성 (함정 A: 배치 교착) ════════════════
 {
   const N = 200; let deadEnds = 0, badChests = 0, badChestRegion = 0, badResp = 0, unreachable = [], respStuck = 0,
@@ -123,7 +184,7 @@ function botPlay(maxSec, opts){
 // ════════════════ P. 진행 단계 ════════════════
 {
   newGame(7); sleepMonster();
-  ok('P1 시작 시 단계 bow · 체력 4 · 목재 1 · 미끼 1', phase === 'bow' && player.hp === 4 && player.planks === 1 && player.bait === 1,
+  ok('P1 시작 시 단계 bow · 체력 5 · 목재 1 · 미끼 1', phase === 'bow' && player.hp === 5 && player.planks === 1 && player.bait === 1,
      [phase, player.hp, player.planks, player.bait].join(','));
   const bow = pickups.find(p => p.s === 'crossbow');
   player.x = bow.x; player.y = bow.y; step(1);
@@ -222,14 +283,14 @@ function botPlay(maxSec, opts){
   }
   ok('M1 괴물이 가만히 있는 플레이어를 잡음 (20판)', caught === 20, caught + '/20');
 
-  // 피격 4번이면 패배, 피격 뒤 무적·괴물 경직
+  // 피격 5번이면 패배 (체력 5), 피격 뒤 무적·괴물 경직
   newGame(31); sleepMonster();
   monster.state = 'chase'; monster.x = player.x + 4; monster.y = player.y; monster.path = [];
   step(1);
-  ok('M2 피격: 체력 -1 · 무적 2.2초 · 괴물 1.1초 경직', player.hp === 3 && player.inv > 2 && monster.stagger > 1,
+  ok('M2 피격: 체력 -1 · 무적 2.2초 · 괴물 1.1초 경직', player.hp === player.hpMax - 1 && player.inv > 2 && monster.stagger > 1,
      [player.hp, player.inv.toFixed(2), monster.stagger.toFixed(2)].join(','));
-  for (let i = 0; i < 3; i++){ player.inv = 0; monster.stagger = 0; monster.x = player.x + 4; monster.y = player.y; step(1); }
-  ok('M3 4번 맞으면 패배', phase === 'over', phase + ' hp=' + player.hp);
+  for (let i = 0; i < player.hpMax - 1; i++){ player.inv = 0; monster.stagger = 0; monster.x = player.x + 4; monster.y = player.y; step(1); }
+  ok('M3 체력만큼(5번) 맞으면 패배', phase === 'over', phase + ' hp=' + player.hp);
 
   // 석궁 명중 → 8초 기절
   newGame(32); sleepMonster(); player.bow = true; player.ammo = 3;
@@ -327,6 +388,14 @@ function botPlay(maxSec, opts){
     if (r.res === 'cleared'){ c2++; times.push(r.t); } else if (r.res === 'over') o2++; else t2++; }
   ok('F3 일반 봇 60판: 시간초과 0 (모든 판이 승패로 끝남)', t2 === 0,
      '클리어 ' + c2 + ' · 패배 ' + o2 + ' · 시간초과 ' + t2 + (times.length ? ' · 평균 ' + (times.reduce((a,b)=>a+b)/times.length).toFixed(0) + '초' : ''));
+
+  // N1 난이도 (승인 목표: 피하는 봇 클리어 70% 이상 · 시간초과 0) — 120판
+  let gc = 0, go = 0, gt = 0, gtimes = [];
+  for (let s = 0; s < 120; s++){ newGame((s < 60 ? 4000 : 4940) + s); const r = avoidPlay(600);
+    if (r.res === 'cleared'){ gc++; gtimes.push(r.t); } else if (r.res === 'over') go++; else gt++; }
+  const gavg = gtimes.length ? gtimes.reduce((a,b)=>a+b,0)/gtimes.length : 0;
+  ok('N1 난이도: 피하는 봇 120판: 클리어 70% 이상 · 시간초과 0', gc / 120 >= 0.70 && gt === 0,
+     `클리어 ${gc} (${(gc/120*100).toFixed(0)}%) · 잡힘 ${go} · 시간초과 ${gt} · 클리어 평균 ${gavg.toFixed(0)}초`);
 }
 
 // ════════════════ T. 미니맵 목표 표시 ════════════════
@@ -373,6 +442,78 @@ function botPlay(maxSec, opts){
      `벽 앞 속도 ${wallSpd.toFixed(1)} · 그림 ${wallAnim} · 미끄러짐 ${slide.toFixed(1)}px`);
 }
 
+
+// ════════════════ V2. 기획서 v2 개선 (A 목표 화살표 · B 괴물 경고 · C 상황 힌트) ════════════════
+{
+  const angDiff = (a, b) => { let d = Math.abs(a - b) % (2*Math.PI); return d > Math.PI ? 2*Math.PI - d : d; };
+  const onEdge = g => g && g.x >= 0 && g.y >= 0 && g.x <= VW && g.y <= VH &&
+    Math.min(g.x, VW - g.x, g.y, VH - g.y) <= 50;
+  // A1: 단계별 목표가 화면 밖일 때 가장자리 화살표가 그 목표를 가리킨다
+  let a1bad = [], a1n = 0;
+  for (let s = 0; s < 10; s++){
+    newGame(8000 + s); sleepMonster();
+    const cases = [];
+    cases.push(['bow', () => pickups.find(p => p.s === 'crossbow')]);
+    cases.push(['rescue', () => { onBow(3); return {x: hostage.x, y: hostage.y}; }]);
+    // 상자: 플레이어 위치에 따라 '가장 가까운 상자'가 바뀌므로, 아무 상자에서 멀리 선 뒤 그때의 목표 상자를 정답으로 본다
+    cases.push(['key', () => { hostage.stage = 3; hostage.rescued = true; hostage.following = true; onRescued(); const c = chests[0]; return {x:(c.tx+.5)*T, y:(c.ty+.5)*T, chest:true}; }]);
+    cases.push(['escape', () => { for (const c of chests) c.opened = true; player.frags = 4; onFragment(); return {x:(exitT[0]+.5)*T, y:(exitT[1]+.5)*T}; }]);
+    for (const [name, prep] of cases){
+      const goal = prep();
+      // 목표에서 가장 먼 쪽(걸어서) 빈 칸에 선다
+      const d = bfs(w2t(goal.x, goal.y)); let far = null, fd = -1;
+      for (let x = 0; x < GW; x++) for (let y = 0; y < GH; y++) if (d[x][y] > fd && !pits.some(q => q.tx === x && q.ty === y)){ fd = d[x][y]; far = [x, y]; }
+      place(far); CAM.ready = false; fxUpdate(1/60);
+      if (goal.chest){ const c = nextChestTarget(); goal.x = (c.tx+.5)*T; goal.y = (c.ty+.5)*T; }
+      draw();
+      const g = GUIDE.goal; a1n++;
+      if (goal.x - camX > -1 && goal.x - camX < VW + 1 && goal.y - camY > -1 && goal.y - camY < VH + 1) { a1n--; continue; }  // 목표가 화면 안이면 이 경우는 A2 몫
+      const want = Math.atan2(goal.y - camY - VH/2, goal.x - camX - VW/2);
+      if (!g || g.mode !== 'edge' || !onEdge(g) || angDiff(g.a, want) > 15*Math.PI/180) a1bad.push(name + '@' + (8000+s));
+      if (name !== 'bow' && phase !== name) a1bad.push('단계 ' + name + '≠' + phase);
+    }
+  }
+  ok('v2-A1 목표가 화면 밖이면 가장자리 화살표가 목표 방향(15° 이내) — 석궁·공주·상자·출구 × 10판', a1bad.length === 0, a1bad.slice(0,4).join(' ') || a1n + '건');
+
+  // A2: 목표가 화면 안이면 목표 위 표시
+  newGame(8100); sleepMonster();
+  const bow = pickups.find(p => p.s === 'crossbow'); const bt = w2t(bow.x, bow.y);
+  const near = [[1,0],[-1,0],[0,1],[0,-1],[2,0],[-2,0],[0,2],[0,-2]].map(o => [bt[0]+o[0], bt[1]+o[1]]).find(t => inB(t[0],t[1]) && !wall[t[0]][t[1]] && !pits.some(q=>q.tx===t[0]&&q.ty===t[1]));
+  place(near); CAM.ready = false; fxUpdate(1/60); draw();
+  ok('v2-A2 목표가 화면 안이면 화살표 대신 목표 위 표시', GUIDE.goal && GUIDE.goal.mode === 'on' &&
+     Math.abs(GUIDE.goal.x - (bow.x - camX)) <= 1, JSON.stringify(GUIDE.goal));
+
+  // B1: 추격 중 + 화면 밖 → 경고 / 화면 안 또는 추격 아님 → 없음
+  newGame(8200); sleepMonster(); fxUpdate(1/60);
+  const putM = (dx, dy, st) => { monster.state = st; monster.x = player.x + dx; monster.y = player.y + dy; monster.path = []; draw(); return GUIDE.mon; };
+  // 화면 크기(휴대폰 352 / 노트북 최대 704)에 맞춰 화면 밖 거리를 잡는다
+  const mOff = putM(VW + T, 0, 'chase'), wantB = Math.atan2(monster.y - camY - VH/2, monster.x - camX - VW/2);
+  const mOn = putM(T*2, 0, 'chase'), mPat = putM(VW + T, 0, 'patrol'), mUp = putM(0, -(VH + T), 'chase');
+  const wantU = Math.atan2(monster.y - camY - VH/2, monster.x - camX - VW/2);
+  ok('v2-B1 괴물 경고: 추격+화면 밖이면 그 방향 가장자리에, 화면 안·순찰 중이면 없음',
+     mOff && angDiff(mOff.a, wantB) < 0.26 && mUp && angDiff(mUp.a, wantU) < 0.26 && !mOn && !mPat,
+     [!!mOff, !!mOn, !!mPat, !!mUp].join(','));
+  sleepMonster();
+
+  // C1: 상황 힌트는 조건이 처음 맞을 때 1번만, 같은 판에서 다시 안 뜸 · 새 판에서 다시 뜸
+  // 시뮬레이션은 한 번에 동기로 돌아 배너를 끄는 타이머가 실행되지 않는다 → 배너를 꺼 두고 본다
+  const bnr = document.getElementById('banner'); bnr.classList.remove('show');
+  let c1bad = 0, kinds = new Set();
+  for (let s = 0; s < 6; s++){
+    newGame(4000 + s);
+    const tl = []; let r;
+    // 피하는 봇으로 한 판 (힌트 표시는 화면 루프에서 하므로 매 프레임 tipUpdate 를 같이 돌린다)
+    const _u = update; let f = 0;
+    window.update = (dt) => { _u(dt); tipUpdate(); };
+    try { r = avoidPlay(300); } finally { window.update = _u; }
+    const ks = tipLog.map(e => e.k); ks.forEach(k => kinds.add(k));
+    if (new Set(ks).size !== ks.length) c1bad++;
+  }
+  const before = tipLog.length; newGame(4001); tipUpdate(); secs(2); for (let i=0;i<200;i++){ update(DT); tipUpdate(); }
+  ok('v2-C1 상황 힌트: 판마다 종류별 1번씩만 (6판) · 이동·석궁·구출·목재·상자 힌트가 실제로 뜸 · 새 판에서 다시 뜸', c1bad === 0 && ['move','fire','rescue','plank','chest'].every(k => kinds.has(k)) && tipLog.length >= 1,
+     `중복 ${c1bad}판 · 나온 종류 ${[...kinds].join(',')}`);
+}
+
 // ════════════════ Z. 무작위 입력 퍼징 ════════════════
 {
   let err = null, nan = 0, inWall = 0, frames = 0;
@@ -397,7 +538,7 @@ function botPlay(maxSec, opts){
   ok('Z3 플레이어가 벽·목재에 박힌 프레임 0', inWall === 0, inWall);
   // 재시작
   start(); const s1 = key(startT); tapped.restart = 1; step(1);
-  ok('Z4 R키 재시작 시 새 판 (단계 bow · 체력 4)', phase === 'bow' && player.hp === 4 && runTime < 0.1, phase + ' hp=' + player.hp);
+  ok('Z4 R키 재시작 시 새 판 (단계 bow · 체력 5)', phase === 'bow' && player.hp === 5 && runTime < 0.1, phase + ' hp=' + player.hp);
 }
 
 return R;
