@@ -72,7 +72,11 @@ def run_ui(browser, url):
     from laptop import laptop_tests
     results = laptop_tests(browser, url, SEEDED_RANDOM, OUT)
     (OUT / 'laptop_results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding='utf-8')
-    return report('C. 노트북 부스 운영 (가로 화면 · 키보드)', results) and ok1
+    ok2 = report('C. 노트북 부스 운영 (가로 화면 · 키보드)', results)
+    from look import look_tests
+    results = look_tests(browser, url, SEEDED_RANDOM, OUT)
+    (OUT / 'look_results.json').write_text(json.dumps(results, ensure_ascii=False, indent=1), encoding='utf-8')
+    return report('E. UI 모양 (도트 글꼴 · 돌판 테두리)', results) and ok1 and ok2
 
 
 def run_art():

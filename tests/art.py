@@ -36,4 +36,17 @@ def art_tests():
        ' · '.join(f'{k} {j0*100:.0f}→{j1*100:.0f}%' for k, j0, j1 in rows[:3]) + f' … 최소 감소 {worst*100:.0f}%')
     ok('D1b 다리 부분은 원본 그대로 (좌우 위치 보정만)', not legs_bad, ', '.join(legs_bad))
     ok('D1c 게임에 들어간 그림 = 정리본', not embed_bad, ', '.join(embed_bad[:4]))
+
+    # U1b 게임에 쓰인 모든 글자가 내장 도트 글꼴에 들어 있다 (빠지면 그 글자만 다른 글꼴로 나온다)
+    from build_ui_assets import used_chars
+    from fontTools.ttLib import TTFont
+    text = used_chars(html)
+    faces = re.findall(r"@font-face\{font-family:'([^']+)';font-weight:(\d+);[^}]*base64,([^)]+)\)", html)
+    missing = {}
+    for fam, wt, b64 in faces:
+        cmap = TTFont(io.BytesIO(base64.b64decode(b64))).getBestCmap()
+        miss = [c for c in text if ord(c) not in cmap and not c.isspace() and ord(c) > 126 and c not in '\u200b']
+        if miss: missing[f'{fam} {wt}'] = ''.join(miss[:12])
+    ok('U1b 게임에 쓰인 모든 글자가 내장 글꼴 4종에 있음', len(faces) == 4 and not missing,
+       f'글꼴 {len(faces)}종 · 글자 {len(text)}자 · 빠짐 {missing or 0}')
     return R

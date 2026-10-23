@@ -53,6 +53,7 @@ def ui_tests(browser, url, seeded_random, out_dir):
        ev("!document.getElementById('intro').classList.contains('hide')") and ev("phase") == 'title',
        ev("document.getElementById('introLine').textContent"))
     page.screenshot(path=str(out_dir / 'ui_1b_intro.png'))
+    page.wait_for_function("introI===0 && !introTyping()", timeout=5000)
     l0 = ev("introI"); page.tap('#introLine'); time.sleep(0.3)
     ok('B3b 화면을 누르면 다음 문장으로 넘어감', ev("introI") == l0 + 1, f'{l0} → {ev("introI")}')
     page.tap('#introSkip'); frames(6)
@@ -214,7 +215,7 @@ def ui_tests(browser, url, seeded_random, out_dir):
     page.reload(); page.wait_for_function("document.getElementById('startBtn').textContent==='시작'", timeout=20000)
     best = ev("document.getElementById('bestLine').textContent")
     ok('B33 새로고침 뒤에도 최고 기록이 제목 화면에 · 소리 꺼짐 상태 유지',
-       'QA1' in best and ev("muted") is True and ev("document.getElementById('muteBtn').textContent") == '🔇', best)
+       'QA1' in best and ev("muted") is True and ev("document.getElementById('muteBtn').classList.contains('off')"), best)
     page.tap('#muteBtn'); ev("start()"); frames(2)
 
     # ── B27 성능: 한 프레임(update+draw) 시간 ──

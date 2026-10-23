@@ -72,7 +72,7 @@
 
 ```
 pip install playwright && playwright install chromium
-python3 tests/qa.py        # 시뮬레이션 62 + 휴대폰 40 + 노트북 10 + 그림 3 = 115개
+python3 tests/qa.py        # 시뮬레이션 62 + 휴대폰 40 + 노트북 10 + UI 모양 5 + 그림 4 = 121개
 ```
 
 미로 200판 생성 검사, 단계 진행, 구출·도구·구덩이 규칙, 무적 봇 120판 완주, 무작위 입력 5분,
@@ -86,7 +86,9 @@ python3 tests/qa.py        # 시뮬레이션 62 + 휴대폰 40 + 노트북 10 + 
 ```
 index.html      게임 전체 (그래픽·효과음 포함, 이 파일 하나로 동작)
 design/plan.md  기획서 v2 (규칙 숫자 · 개선안 · 완료 기준 · 성능 상한 · 검수 결과)
-tools/          걷기 그림 떨림 정리 도구 (steady_frames.py, 원본은 art/sprites_raw)
+design/ui.md    UI 디자인 (색·글꼴·모양 규칙)
+tools/          걷기 그림 떨림 정리(steady_frames.py) · UI 글꼴·아이콘 내장(build_ui_assets.py — 문구를 바꾸면 다시 실행)
+art/fonts/      갈무리 글꼴 (OFL)
 art/sprites/    캐릭터·아이템 도트 스프라이트
 art/tiles/      구역별 벽·바닥 타일 (32×32)
 assets/         README 미리보기
@@ -97,4 +99,5 @@ tests/          자동 검수 (qa.py · sim.js · ui.py · progress.txt)
 
 - 기획: 송휘
 - 캐릭터·배경 설정화: Higgsfield로 생성 후 게임용 도트로 변환
+- 글꼴: [갈무리(Galmuri)](https://github.com/quiple/galmuri) — SIL Open Font License 1.1
 - 게임 코드: Claude와 함께 제작

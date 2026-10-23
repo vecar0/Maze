@@ -74,6 +74,7 @@ def laptop_tests(browser, url, seeded_random, out_dir):
     steps = []
     pg.keyboard.press('Enter'); time.sleep(0.3)
     steps.append(('Enter→도입', ev("!document.getElementById('intro').classList.contains('hide') && phase==='title'")))
+    pg.wait_for_function("introI===0 && !introTyping()", timeout=5000)
     i0 = ev("introI"); pg.keyboard.press('Enter'); time.sleep(0.3)
     steps.append(('Enter→다음 문장', ev("introI") == i0 + 1))
     pg.keyboard.press('Escape'); frames(pg, 3)
