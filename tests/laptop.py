@@ -152,5 +152,16 @@ def laptop_tests(browser, url, seeded_random, out_dir):
     ok('F1 진동: 맞을 때·구덩이·상자에서 진동 요청 · 진동 없는 기기에서도 오류 0', calls == 3, f'진동 요청 {calls}회')
     ctx.close()
 
+    # X4 실제 키보드로 대각선 시도 (D 를 누른 채 W 까지) → 매 순간 한 축으로만 움직인다
+    ctx, pg = page_at(1366, 768)
+    pg.keyboard.press('Enter'); time.sleep(0.2); pg.keyboard.press('Escape'); frames(pg, 3)
+    pg.evaluate("monster.state='dormant'; monster.x=-1e6; window.__dg=0; window.__mv=0; (function f(){ if(Math.abs(player.vx)>8&&Math.abs(player.vy)>8) __dg++; if(Math.hypot(player.vx,player.vy)>8) __mv++; requestAnimationFrame(f); })();")
+    for combo in (('d', 'w'), ('a', 's'), ('ArrowRight', 'ArrowDown')):
+        pg.keyboard.down(combo[0]); time.sleep(0.3); pg.keyboard.down(combo[1]); time.sleep(0.5)
+        pg.keyboard.up(combo[1]); pg.keyboard.up(combo[0]); time.sleep(0.2)
+    dg, mv = pg.evaluate("[__dg, __mv]")
+    ok('X4 실제 키보드로 두 방향키를 같이 눌러도 대각선으로 안 움직임', mv > 20 and dg == 0, f'움직인 프레임 {mv} · 대각선 {dg}')
+    ctx.close()
+
     ok('L0 노트북 테스트 전체 동안 콘솔 에러·경고 0', not logs, ' | '.join(logs[:3]))
     return R

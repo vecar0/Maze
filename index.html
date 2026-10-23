@@ -323,7 +323,7 @@ const CELLS = 15;             // 15x15칸 = 31x31타일
 const GW = CELLS*2+1, GH = CELLS*2+1;
 const U = T/2;                // 유니티 1유닛 = 16도트
 const SPD_WALK = 6.8*U, SPD_RUN = 9.2*U;      // 괴물과 같은 기본 속도
-const SPD_PATROL = 5.3*U, SPD_SEARCH = 6.2*U, SPD_CHASE = 8.2*U, ENRAGE = 0.25*U;   // 추격: 걷기(6.8)보다 빠르고 달리기(9.2)보다 느리다 → 걸으면 잡히고 달려야 떼어낸다
+const SPD_PATROL = 5.3*U, SPD_SEARCH = 6.2*U, SPD_CHASE = 8.6*U, ENRAGE = 0.25*U;   // 추격: 걷기(6.8)보다 빠르고 달리기(9.2)보다 느리다 → 걸으면 잡히고 달려야 떼어낸다
 const VIEW = 14*U, HEAR = 10*U, HEAR_WALK = 4*U;   // 시야 7칸 · 달리는 소리 5칸 · 걷는 소리 2칸
 const STUN = 8, AMMO = 3, PLANK_HP = 2, PLANK_MAX = 3;
 const BOLT_SPOTS = 3, BOLTS_PER = 2;
@@ -531,7 +531,7 @@ function reset(){
   seen=[]; for(let x=0;x<GW;x++){seen[x]=[]; for(let y=0;y<GH;y++) seen[x][y]=false;}
 
   const [px,py]=tw(startT[0],startT[1]);
-  player={x:px,y:py,r:3.6*K,hp:6,hpMax:6,st:100,run:false,fx:0,fy:1,vx:0,vy:0,
+  player={x:px,y:py,r:3.6*K,hp:5,hpMax:5,st:100,run:false,fx:0,fy:1,vx:0,vy:0,
           planks:1,bow:false,ammo:0,bait:1,key:false,frags:0,fall:0,aim:0,
           inv:0,bob:0,spd:0,knock:0,kx:0,ky:0};
 
@@ -683,6 +683,7 @@ addEventListener('keydown',ev=>{
   lastInput=performance.now();
   if(typing){ if(ev.key==='Enter'){ const nb=document.getElementById('nameBtn'); if(nb) nb.click(); } return; }
   if(menuKey(ev)) return;
+  if(!ev.repeat) dirPress(ev.key.toLowerCase());
   keys[ev.key.toLowerCase()]=1;
   if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(ev.key.toLowerCase())) ev.preventDefault();
   const k=ev.key.toLowerCase();
@@ -691,7 +692,8 @@ addEventListener('keydown',ev=>{
   if(k==='q') tapped.bait=1;
   if(k==='r') tapped.restart=1;
 });
-addEventListener('keyup',ev=>{ keys[ev.key.toLowerCase()]=0; });
+addEventListener('keyup',ev=>{ const k=ev.key.toLowerCase(); keys[k]=0; dirRelease(k); });
+addEventListener('blur',()=>{ for(const k in keys) keys[k]=0; dirOrder.length=0; });   // 창을 벗어나면 눌림 해제
 ['pointerdown','touchstart','mousemove','wheel'].forEach(t=>addEventListener(t,()=>{ lastInput=performance.now(); },{passive:true}));
 let lastInput=performance.now();
 // 제목·도입·결과 화면의 키보드 조작 (마우스 없이 부스 운영)
@@ -766,21 +768,54 @@ const joy={x:0,y:0,mag:0,id:null,active:false};
   b.addEventListener('touchstart',go,{passive:false}); b.addEventListener('click',go);
 })();
 
-function axis(){
-  let dx=0,dy=0;
-  if(keys['a']||keys['arrowleft']||held.left) dx-=1;
-  if(keys['d']||keys['arrowright']||held.right) dx+=1;
-  if(keys['w']||keys['arrowup']||held.up) dy-=1;
-  if(keys['s']||keys['arrowdown']||held.down) dy+=1;
+// ── 이동은 상하좌우 네 방향만 ──
+// 키보드: 여러 방향키를 같이 누르면 가장 나중에 누른 키. 조이스틱: 더 많이 민 축.
+// 미리 꺾기: 가려는 방향이 막혀 있으면 같이 누른 다른 방향으로 계속 가다가, 길이 열리는 순간 꺾는다.
+const DIRV={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
+const KEYDIR={w:'up',arrowup:'up',s:'down',arrowdown:'down',a:'left',arrowleft:'left',d:'right',arrowright:'right'};
+const dirOrder=[];                       // 누르고 있는 방향키 (나중에 누른 것이 앞)
+function dirPress(k){ const d=KEYDIR[k]; if(!d) return; const i=dirOrder.indexOf(d); if(i>=0) dirOrder.splice(i,1); dirOrder.unshift(d); }
+function dirRelease(k){ const d=KEYDIR[k]; if(!d) return;
+  // 같은 방향의 다른 키(W와 ↑)가 아직 눌려 있으면 유지
+  for(const kk in KEYDIR) if(KEYDIR[kk]===d && kk!==k && keys[kk]) return;
+  const i=dirOrder.indexOf(d); if(i>=0) dirOrder.splice(i,1); }
+function dirOpen(d){
+  if(!player) return true;
+  const v=DIRV[d], [tx,ty]=w2t(player.x,player.y);
+  if(solidTile(tx+v[0],ty+v[1])) return false;               // 다음 칸이 벽·목재
+  // 옆으로 꺾을 땐 갈림길 가운데(±9px)에 왔을 때 — 그 전엔 원래 방향으로 계속 간다
+  const off = v[0]===0 ? player.x-(tx+0.5)*T : player.y-(ty+0.5)*T;
+  return Math.abs(off)<=9;
+}
+function axisDirs(){
+  const c=[];
   if(joy.active && joy.mag>0.2){
-    const deg=(Math.atan2(joy.y,joy.x)*180/Math.PI+360)%360;
-    const card=Math.round(deg/90)*90;
-    const snap = Math.abs(deg-card)<=30 ? card : Math.round((deg-45)/90)*90+45;
-    const rad=snap*Math.PI/180;
-    dx=Math.round(Math.cos(rad)*1000)/1000; dy=Math.round(Math.sin(rad)*1000)/1000;
+    const ax=Math.abs(joy.x), ay=Math.abs(joy.y);
+    const h=joy.x>0?'right':'left', v=joy.y>0?'down':'up';
+    if(ax>=ay){ c.push(h); if(ay>0.38*joy.mag) c.push(v); }
+    else      { c.push(v); if(ax>0.38*joy.mag) c.push(h); }
+    return c;
   }
-  const m=Math.hypot(dx,dy);
-  return m>0 ? [dx/m, dy/m] : [0,0];      // 항상 단위 방향 (속도는 걷기/달리기로만 결정)
+  for(const d of dirOrder) if(!c.includes(d)) c.push(d);
+  for(const d of ['up','down','left','right']) if(held[d] && !c.includes(d)) c.push(d);
+  // 반대 방향을 같이 누르면 나중 것만
+  return c.filter((d,i)=>!c.slice(0,i).some(e=>DIRV[e][0]===-DIRV[d][0]&&DIRV[e][1]===-DIRV[d][1]));
+}
+function axis(){
+  const c=axisDirs();
+  if(!c.length) return [0,0];
+  const d=c.find(dirOpen);
+  if(d) return DIRV[d].slice();
+  // 꺾을 칸은 열렸는데 아직 갈림길 가운데가 아니면, 가운데 쪽으로 먼저 간다 (살짝 지나쳐 눌러도 맞춰 꺾인다)
+  if(player){
+    const [tx,ty]=w2t(player.x,player.y);
+    for(const e of c){ const v=DIRV[e];
+      if(solidTile(tx+v[0],ty+v[1])) continue;
+      if(v[0]===0){ const off=player.x-(tx+0.5)*T; return [off<0?1:-1,0]; }
+      else        { const off=player.y-(ty+0.5)*T; return [0,off<0?1:-1]; }
+    }
+  }
+  return DIRV[c[0]].slice();
 }
 const wantRun = ()=> !!(keys['shift']||held.run||(joy.active&&joy.mag>0.85));
 const wantUse = ()=> !!(keys['e']||usePressed);
@@ -1108,6 +1143,7 @@ function start(){
   if(!assetsReady) return;
   tapped.fire=tapped.plank=tapped.bait=tapped.restart=0; usePressed=false;
   for(const k in keys) keys[k]=0;
+  dirOrder.length=0;
   document.getElementById('screen').classList.add('hide');
   reset(); phase='bow'; monster.state='patrol';
   setObj('수면 석궁을 찾아라');
@@ -1192,6 +1228,8 @@ function update(dt){
     player.vx=player.vy=0;
   } else {
     // 목표 속도로 부드럽게 붙는다. 손을 떼면 더 빨리 멈춘다 (멈출 때 미끄러지지 않게)
+    // 상하좌우만: 꺾는 순간 이전 축 속도는 바로 0 → 모서리를 둥글게(비스듬히) 돌지 않고 직각으로 꺾인다
+    if(dx) player.vy=0; else if(dy) player.vx=0;
     const k=1-Math.exp(-((dx||dy)?20:45)*dt);
     player.vx+=(dx*sp-player.vx)*k;
     player.vy+=(dy*sp-player.vy)*k;

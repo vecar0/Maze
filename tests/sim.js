@@ -33,8 +33,10 @@ function steerTo(goal){
   const n = path.length ? path[0] : goal;
   const [tx, ty] = tw(n[0], n[1]);
   held.up = held.down = held.left = held.right = 0;
-  if (tx - player.x > 2) held.right = 1; else if (player.x - tx > 2) held.left = 1;
-  if (ty - player.y > 2) held.down = 1; else if (player.y - ty > 2) held.up = 1;
+  // 상하좌우만 — 사람처럼 더 많이 가야 하는 쪽 한 방향만 누른다
+  const ddx = tx - player.x, ddy = ty - player.y;
+  if (Math.abs(ddx) >= Math.abs(ddy)) { if (ddx > 2) held.right = 1; else if (ddx < -2) held.left = 1; }
+  else { if (ddy > 2) held.down = 1; else if (ddy < -2) held.up = 1; }
 }
 function botGoal(){
   if (phase === 'bow') { const b = pickups.find(p => p.s === 'crossbow'); if (b) return w2t(b.x, b.y); }
@@ -184,7 +186,7 @@ function avoidPlay(maxSec){
 // ════════════════ P. 진행 단계 ════════════════
 {
   newGame(7); sleepMonster();
-  ok('P1 시작 시 단계 bow · 체력 6 · 목재 1 · 미끼 1', phase === 'bow' && player.hp === 6 && player.planks === 1 && player.bait === 1,
+  ok('P1 시작 시 단계 bow · 체력 5 · 목재 1 · 미끼 1', phase === 'bow' && player.hp === 5 && player.planks === 1 && player.bait === 1,
      [phase, player.hp, player.planks, player.bait].join(','));
   const bow = pickups.find(p => p.s === 'crossbow');
   player.x = bow.x; player.y = bow.y; step(1);
@@ -290,7 +292,7 @@ function avoidPlay(maxSec){
   ok('M2 피격: 체력 -1 · 무적 2.2초 · 괴물 1.8초 멈칫', player.hp === player.hpMax - 1 && player.inv > 2 && monster.stagger > 1.7,
      [player.hp, player.inv.toFixed(2), monster.stagger.toFixed(2)].join(','));
   for (let i = 0; i < player.hpMax - 1; i++){ player.inv = 0; monster.stagger = 0; monster.x = player.x + 4; monster.y = player.y; step(1); }
-  ok('M3 체력만큼(6번) 맞으면 패배', phase === 'over', phase + ' hp=' + player.hp);
+  ok('M3 체력만큼(5번) 맞으면 패배', phase === 'over', phase + ' hp=' + player.hp);
 
   // 석궁 명중 → 8초 기절
   newGame(32); sleepMonster(); player.bow = true; player.ammo = 3;
@@ -553,9 +555,57 @@ function avoidPlay(maxSec){
      `걷기 잡힘 ${walkCaught}/20 (평균 ${(wt.reduce((a,b)=>a+b,0)/Math.max(1,wt.length)).toFixed(1)}초) · 달리기 안 잡힘 ${runSafe}/20`);
 }
 
+
+// ════════════════ X. 상하좌우 조작만 (2026-10-23 "상하좌우 조작만 가능하게") ════════════════
+{
+  const isCard = v => (v[0] === 0) !== (v[1] === 0) || (v[0] === 0 && v[1] === 0);
+  const press = k => { keys[k] = 1; dirPress(k); }, lift = k => { keys[k] = 0; dirRelease(k); };
+  const clearKeys = () => { for (const k in keys) keys[k] = 0; dirOrder.length = 0; release(); };
+  // 열린 십자 교차로를 찾아 선다 (네 방향 다 열림)
+  newGame(9100); sleepMonster(); clearKeys();
+  let cross = null;
+  for (let x = 1; x < GW-1 && !cross; x++) for (let y = 1; y < GH-1; y++)
+    if (!wall[x][y] && !wall[x+1][y] && !wall[x-1][y] && !wall[x][y+1] && !wall[x][y-1] && !pits.some(q=>Math.abs(q.tx-x)+Math.abs(q.ty-y)<=1)){ cross = [x, y]; break; }
+  place(cross);
+  press('d'); press('w'); const a1 = axis();
+  lift('w'); const a2 = axis();
+  press('arrowdown'); const a3 = axis();
+  clearKeys();
+  ok('X1 키 두 개를 같이 눌러도 한 방향만 (나중에 누른 키 · 떼면 남은 키로)',
+     a1[0] === 0 && a1[1] === -1 && a2[0] === 1 && a2[1] === 0 && a3[0] === 0 && a3[1] === 1, JSON.stringify([a1, a2, a3]));
+
+  // X2 조이스틱: 어느 각도로 밀어도 한 축
+  let diag = 0;
+  for (let deg = 0; deg < 360; deg += 5){ const r = deg * Math.PI / 180;
+    joy.active = true; joy.mag = 0.7; joy.x = Math.cos(r) * 0.7; joy.y = Math.sin(r) * 0.7;
+    if (!isCard(axis())) diag++; }
+  joy.active = false; joy.mag = 0;
+  ok('X2 조이스틱을 어느 각도(5°마다 72방향)로 밀어도 한 방향만', diag === 0, diag + '개 대각선');
+
+  // X3 미리 꺾기: 오른쪽으로 가며 '위'를 같이 누르고 있으면, 위가 막힌 동안은 오른쪽으로 가다가 위가 열리는 칸에서 꺾는다
+  let ok3 = 0, tried = 0, why = [];
+  for (let s = 0; s < 40 && tried < 10; s++){
+    newGame(9200 + s); sleepMonster(); clearKeys();
+    // 오른쪽 3칸이 열린 복도 + 처음 2칸은 위가 막힘 + 3번째 칸은 위가 열림
+    let st = null;
+    for (let x = 1; x < GW-4 && !st; x++) for (let y = 2; y < GH-2; y++){
+      if (wall[x][y]||wall[x+1][y]||wall[x+2][y]) continue;
+      if (!wall[x][y-1] || !wall[x+1][y-1] || wall[x+2][y-1]) continue;
+      if (pits.some(q => q.ty >= y-1 && q.ty <= y && q.tx >= x && q.tx <= x+2)) continue;
+      st = [x, y]; break; }
+    if (!st) continue; tried++;
+    place(st); press('d'); press('w');
+    let turnedAt = null;
+    for (let f = 0; f < 120; f++){ update(DT); const t = w2t(player.x, player.y); if (t[1] < st[1]) { turnedAt = t; break; } }
+    clearKeys();
+    if (turnedAt && turnedAt[0] === st[0] + 2) ok3++; else why.push(JSON.stringify([st, turnedAt]));
+  }
+  ok('X3 미리 꺾기: 꺾으려는 쪽이 막힌 동안은 원래 방향으로 가다가 열리는 칸에서 꺾음', tried >= 5 && ok3 === tried, `${ok3}/${tried} ${why.slice(0,2).join(' ')}`);
+}
+
 // ════════════════ Z. 무작위 입력 퍼징 ════════════════
 {
-  let err = null, nan = 0, inWall = 0, frames = 0;
+  let err = null, nan = 0, inWall = 0, frames = 0, zdiag = 0;
   newGame(9001);
   for (let f = 0; f < 60 * 300; f++){
     if (f % 23 === 0){ held.up = Math.random() < .4 ? 1 : 0; held.down = Math.random() < .4 ? 1 : 0;
@@ -569,15 +619,17 @@ function avoidPlay(maxSec){
     try { update(DT); if (f % 30 === 0) draw(); } catch(e){ err = e.message + ' @' + f; break; }
     frames++;
     if (!isFinite(player.x) || !isFinite(player.y) || !isFinite(monster.x) || !isFinite(monster.y)) nan++;
+    { const a = axis(); if (a[0] !== 0 && a[1] !== 0) zdiag++; }
     if (blocked(player.x, player.y, player.r) && player.fall <= 0) inWall++;
     if (phase === 'over' || phase === 'cleared'){ release(); start(); }
   }
   ok('Z1 무작위 입력 5분: 예외 0', !err, err || frames + '프레임');
   ok('Z2 좌표 NaN 0', nan === 0, nan);
+  ok('Z2b 무작위 입력 5분 동안 대각선 이동 입력 0', zdiag === 0, zdiag);
   ok('Z3 플레이어가 벽·목재에 박힌 프레임 0', inWall === 0, inWall);
   // 재시작
   start(); const s1 = key(startT); tapped.restart = 1; step(1);
-  ok('Z4 R키 재시작 시 새 판 (단계 bow · 체력 6)', phase === 'bow' && player.hp === 6 && runTime < 0.1, phase + ' hp=' + player.hp);
+  ok('Z4 R키 재시작 시 새 판 (단계 bow · 체력 5)', phase === 'bow' && player.hp === 5 && runTime < 0.1, phase + ' hp=' + player.hp);
 }
 
 return R;
