@@ -184,7 +184,7 @@ function avoidPlay(maxSec){
 // ════════════════ P. 진행 단계 ════════════════
 {
   newGame(7); sleepMonster();
-  ok('P1 시작 시 단계 bow · 체력 5 · 목재 1 · 미끼 1', phase === 'bow' && player.hp === 5 && player.planks === 1 && player.bait === 1,
+  ok('P1 시작 시 단계 bow · 체력 6 · 목재 1 · 미끼 1', phase === 'bow' && player.hp === 6 && player.planks === 1 && player.bait === 1,
      [phase, player.hp, player.planks, player.bait].join(','));
   const bow = pickups.find(p => p.s === 'crossbow');
   player.x = bow.x; player.y = bow.y; step(1);
@@ -287,10 +287,10 @@ function avoidPlay(maxSec){
   newGame(31); sleepMonster();
   monster.state = 'chase'; monster.x = player.x + 4; monster.y = player.y; monster.path = [];
   step(1);
-  ok('M2 피격: 체력 -1 · 무적 2.2초 · 괴물 1.1초 경직', player.hp === player.hpMax - 1 && player.inv > 2 && monster.stagger > 1,
+  ok('M2 피격: 체력 -1 · 무적 2.2초 · 괴물 1.8초 멈칫', player.hp === player.hpMax - 1 && player.inv > 2 && monster.stagger > 1.7,
      [player.hp, player.inv.toFixed(2), monster.stagger.toFixed(2)].join(','));
   for (let i = 0; i < player.hpMax - 1; i++){ player.inv = 0; monster.stagger = 0; monster.x = player.x + 4; monster.y = player.y; step(1); }
-  ok('M3 체력만큼(5번) 맞으면 패배', phase === 'over', phase + ' hp=' + player.hp);
+  ok('M3 체력만큼(6번) 맞으면 패배', phase === 'over', phase + ' hp=' + player.hp);
 
   // 석궁 명중 → 8초 기절
   newGame(32); sleepMonster(); player.bow = true; player.ammo = 3;
@@ -389,12 +389,13 @@ function avoidPlay(maxSec){
   ok('F3 일반 봇 60판: 시간초과 0 (모든 판이 승패로 끝남)', t2 === 0,
      '클리어 ' + c2 + ' · 패배 ' + o2 + ' · 시간초과 ' + t2 + (times.length ? ' · 평균 ' + (times.reduce((a,b)=>a+b)/times.length).toFixed(0) + '초' : ''));
 
-  // N1 난이도 (승인 목표: 피하는 봇 클리어 70% 이상 · 시간초과 0) — 120판
+  // N1 난이도 (승인 목표: 피하는 봇 클리어 50% 정도 · 시간초과 0) — 120판
   let gc = 0, go = 0, gt = 0, gtimes = [];
   for (let s = 0; s < 120; s++){ newGame((s < 60 ? 4000 : 4940) + s); const r = avoidPlay(600);
     if (r.res === 'cleared'){ gc++; gtimes.push(r.t); } else if (r.res === 'over') go++; else gt++; }
   const gavg = gtimes.length ? gtimes.reduce((a,b)=>a+b,0)/gtimes.length : 0;
-  ok('N1 난이도: 피하는 봇 120판: 클리어 70% 이상 · 시간초과 0', gc / 120 >= 0.70 && gt === 0,
+  // 목표 변경 (2026-10-23 송휘): 괴물이 '걸으면 잡히고 달려야 떼어내게' 세지면서 클리어 50% 정도로
+  ok('N1 난이도: 피하는 봇 120판: 클리어 45~65% · 시간초과 0', gc / 120 >= 0.45 && gc / 120 <= 0.65 && gt === 0,
      `클리어 ${gc} (${(gc/120*100).toFixed(0)}%) · 잡힘 ${go} · 시간초과 ${gt} · 클리어 평균 ${gavg.toFixed(0)}초`);
 }
 
@@ -514,6 +515,44 @@ function avoidPlay(maxSec){
      `중복 ${c1bad}판 · 나온 종류 ${[...kinds].join(',')}`);
 }
 
+
+// ════════════════ K. 상자 배치 · 괴물 추격감 (2026-10-23 피드백) ════════════════
+{
+  // K1: 상자가 한곳에 몰리지 않는다
+  let close = 0, edge = 0, minAll = 99;
+  for (let s = 1; s <= 200; s++){
+    newGame(1000 + s);
+    for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++){
+      const d = Math.hypot(chests[i].tx - chests[j].tx, chests[i].ty - chests[j].ty); minAll = Math.min(minAll, d); if (d < 10) close++; }
+    for (const c of chests){ const dx = Math.abs(c.tx - nest[0]), dy = Math.abs(c.ty - nest[1]);
+      const core = (c.reg === 0 || c.reg === 2) ? dy - dx : dx - dy; if (core < 3) edge++; }
+  }
+  ok('K1 상자 4개가 서로 10칸 이상 떨어짐 · 구역 경계(대각선)에서 3칸 이상 (200판)', close === 0 && edge === 0,
+     `가까운 쌍 ${close} · 경계 붙음 ${edge} · 최소 거리 ${minAll.toFixed(1)}칸`);
+
+  // K2: 걸어서 도망치면 잡히고, 달리면 떼어낸다 — 플레이어가 1초 먼저 출발, 괴물이 출발점에서 추격
+  const trial = (run, secsMax, seed) => {
+    newGame(seed); sleepMonster(); release();
+    const st = w2t(player.x, player.y), d = bfs(st);
+    let far = st, fd = -1; for (let x = 0; x < GW; x++) for (let y = 0; y < GH; y++) if (d[x][y] > fd){ fd = d[x][y]; far = [x, y]; }
+    const saved = pits.splice(0);                       // 이 측정에선 구덩이를 치운다
+    const go = (n) => { for (let f = 0; f < n; f++){ if (f % 6 === 0) steerTo(far); held.run = run ? 1 : 0; update(DT); } };
+    go(60);
+    const [sx, sy] = tw(st[0], st[1]);
+    monster.state = 'chase'; monster.x = sx; monster.y = sy; monster.path = []; monster.repath = 0; monster.lk = w2t(player.x, player.y);
+    monster.tired = 0; monster.summoned = 0; monster.stagger = 0;
+    const hp0 = player.hp; let caughtAt = -1;
+    for (let f = 0; f < secsMax * 60; f++){ go(1); if (player.hp < hp0){ caughtAt = f / 60; break; } }
+    pits.push(...saved);
+    return caughtAt;
+  };
+  let walkCaught = 0, runSafe = 0, wt = [];
+  for (let i = 0; i < 20; i++){ const t = trial(false, 10, 9000 + i); if (t >= 0){ walkCaught++; wt.push(t); } }
+  for (let i = 0; i < 20; i++){ if (trial(true, 4, 9000 + i) < 0) runSafe++; }
+  ok('K2 추격감: 걸어서 도망치면 10초 안에 잡힘(80%+) · 달리면 4초 동안 안 잡힘(80%+)', walkCaught >= 16 && runSafe >= 16,
+     `걷기 잡힘 ${walkCaught}/20 (평균 ${(wt.reduce((a,b)=>a+b,0)/Math.max(1,wt.length)).toFixed(1)}초) · 달리기 안 잡힘 ${runSafe}/20`);
+}
+
 // ════════════════ Z. 무작위 입력 퍼징 ════════════════
 {
   let err = null, nan = 0, inWall = 0, frames = 0;
@@ -538,7 +577,7 @@ function avoidPlay(maxSec){
   ok('Z3 플레이어가 벽·목재에 박힌 프레임 0', inWall === 0, inWall);
   // 재시작
   start(); const s1 = key(startT); tapped.restart = 1; step(1);
-  ok('Z4 R키 재시작 시 새 판 (단계 bow · 체력 5)', phase === 'bow' && player.hp === 5 && runTime < 0.1, phase + ' hp=' + player.hp);
+  ok('Z4 R키 재시작 시 새 판 (단계 bow · 체력 6)', phase === 'bow' && player.hp === 6 && runTime < 0.1, phase + ' hp=' + player.hp);
 }
 
 return R;

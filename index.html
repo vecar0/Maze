@@ -258,8 +258,8 @@ const CELLS = 15;             // 15x15칸 = 31x31타일
 const GW = CELLS*2+1, GH = CELLS*2+1;
 const U = T/2;                // 유니티 1유닛 = 16도트
 const SPD_WALK = 6.8*U, SPD_RUN = 9.2*U;      // 괴물과 같은 기본 속도
-const SPD_PATROL = 5.3*U, SPD_CHASE = 5.3*U, ENRAGE = 0.25*U;   // 걷기보다 느려서 걸어도 떼어낼 수 있다
-const VIEW = 9*U, HEAR = 6.5*U;
+const SPD_PATROL = 5.3*U, SPD_SEARCH = 6.2*U, SPD_CHASE = 8.2*U, ENRAGE = 0.25*U;   // 추격: 걷기(6.8)보다 빠르고 달리기(9.2)보다 느리다 → 걸으면 잡히고 달려야 떼어낸다
+const VIEW = 14*U, HEAR = 10*U, HEAR_WALK = 4*U;   // 시야 7칸 · 달리는 소리 5칸 · 걷는 소리 2칸
 const STUN = 8, AMMO = 3, PLANK_HP = 2, PLANK_MAX = 3;
 const BOLT_SPOTS = 3, BOLTS_PER = 2;
 const BAIT_SPOTS = 3, BAIT_MAX = 2, BAIT_EAT = 4;   // 미끼: 괴물이 4초간 먹느라 무시
@@ -466,7 +466,7 @@ function reset(){
   seen=[]; for(let x=0;x<GW;x++){seen[x]=[]; for(let y=0;y<GH;y++) seen[x][y]=false;}
 
   const [px,py]=tw(startT[0],startT[1]);
-  player={x:px,y:py,r:3.6*K,hp:5,hpMax:5,st:100,run:false,fx:0,fy:1,vx:0,vy:0,
+  player={x:px,y:py,r:3.6*K,hp:6,hpMax:6,st:100,run:false,fx:0,fy:1,vx:0,vy:0,
           planks:1,bow:false,ammo:0,bait:1,key:false,frags:0,fall:0,aim:0,
           inv:0,bob:0,spd:0,knock:0,kx:0,ky:0};
 
@@ -508,12 +508,20 @@ function reset(){
     if(used[t]||near(t)||ds[t[0]][t[1]]<4) continue;
     used[t]=1; pickups.push(mk('meat',t,1)); nm++;
   }
-  // ── 열쇠 조각 상자: 네 구역에 하나씩, 구역 안에서 가장 깊은 곳 ──
-  for(let r=0;r<4;r++){
-    const cand=open.filter(t=>region(t[0],t[1])===r && ds[t[0]][t[1]]>6 && !used[t]);
+  // ── 열쇠 조각 상자: 네 구역에 하나씩 ──
+  // 예전엔 '시작점에서 가장 먼 곳'이라, 반대편 구석에서 두 구역의 상자가 경계를 사이에 두고 붙곤 했다.
+  // 이제는 구역의 한가운데 축 근처(대각선 경계에서 3칸 이상)에서, 이미 놓인 상자와 최대한 멀리 고른다.
+  const core=(t,r)=>{ const dx=Math.abs(t[0]-nest[0]), dy=Math.abs(t[1]-nest[1]); return (r===0||r===2)? dy-dx : dx-dy; };
+  for(const r of [0,1,2,3].sort(()=>Math.random()-0.5)){
+    let cand=open.filter(t=>region(t[0],t[1])===r && ds[t[0]][t[1]]>6 && !used[t] && core(t,r)>=3);
+    if(!cand.length) cand=open.filter(t=>region(t[0],t[1])===r && ds[t[0]][t[1]]>6 && !used[t]);
     if(!cand.length) continue;
-    let best=cand[0];
-    for(const t of cand) if(ds[t[0]][t[1]]>ds[best[0]][best[1]]) best=t;
+    const score=t=>{
+      let m=99; for(const c of chests) m=Math.min(m,Math.hypot(c.tx-t[0],c.ty-t[1]));
+      return Math.min(m,16)*2 + Math.min(core(t,r),8) + Math.min(ds[t[0]][t[1]],30)*0.15 + Math.random()*2;
+    };
+    let best=cand[0], bs=-1e9;
+    for(const t of cand){ const v=score(t); if(v>bs){ bs=v; best=t; } }
     used[best]=1;
     chests.push({tx:best[0],ty:best[1],opened:false,reg:r});
   }
@@ -959,10 +967,13 @@ let _nc={tile:'',ver:-1,chest:null};
 function nextChestTarget(){
   const pt=w2t(player.x,player.y), k=pt.join(','), ver=chests.filter(c=>c.opened).length;
   if(_nc.tile===k && _nc.ver===ver && (!_nc.chest||!_nc.chest.opened)) return _nc.chest;
-  const d=bfs(pt); let best=null, bd=1e9;
+  // 사람이 실제로 걷는 거리 = 구덩이를 피해 돌아가는 거리
+  const P=new Set(pits.map(q=>q.tx+','+q.ty)); P.delete(k);
+  let d=bfsAvoid(pt,P); let best=null, bd=1e9;
   for(const c of chests){ if(c.opened) continue; const v=d[c.tx][c.ty]; if(v>=0&&v<bd){bd=v;best=c;} }
-  // 살짝 더 가까운 상자가 생겨도 1칸 이내 차이면 원래 목표를 유지 (깜빡임 방지)
-  if(_nc.chest && !_nc.chest.opened && best!==_nc.chest){ const v=d[_nc.chest.tx][_nc.chest.ty]; if(v>=0 && v<=bd+1) best=_nc.chest; }
+  if(!best){ d=bfs(pt); for(const c of chests){ if(c.opened) continue; const v=d[c.tx][c.ty]; if(v>=0&&v<bd){bd=v;best=c;} } }
+  // 다른 상자가 조금(3칸 이내) 더 가까워져도 원래 목표를 유지 (돌아가는 길에서 깜빡임 방지)
+  if(_nc.chest && !_nc.chest.opened && best!==_nc.chest){ const v=d[_nc.chest.tx][_nc.chest.ty]; if(v>=0 && v<=bd+3) best=_nc.chest; }
   _nc={tile:k,ver:ver,chest:best}; return best;
 }
 function chestNear(){
@@ -1366,21 +1377,22 @@ function updateMonster(dt){
   const moving = !!(axis()[0]||axis()[1]);
   const eff = VIEW*(moving?1:0.6);
   const sees = d<=eff && los(mt,pt);
-  const hears = player.run && d<=HEAR;
+  const hears = (player.run && d<=HEAR) || (moving && d<=HEAR_WALK);
   if(sees||hears){
     M.lk=pt; M.lost=0;
     if(M.state!=='chase'&&M.state!=='break'){ M.state='chase'; M.repath=0; M.tired=0; }
   } else if(M.state==='chase'){
     if(M.summoned>0){ M.lost=0; M.lk=pt; }
     M.lost+=dt;
-    if(M.lost>=1.8){ M.state='search'; M.tired=0; M.path=astar(mt,M.lk); M.pi=0; }
+    if(M.lost>=3.0){ M.state='search'; M.tired=0; M.path=astar(mt,M.lk); M.pi=0; }
   }
 
   // 판단
   M.repath-=dt;
   if(M.state==='chase'){
     M.tired+=dt;                                  // 오래 쫓으면 숨이 찬다
-    if(M.repath<=0){ M.path=astar(mt,pt); M.pi=0; M.repath=0.35; }
+    // 길 끝에 닿으면 기다리지 않고 바로 다시 찾는다 (예전: 0.35초마다만 찾아서, 가까이 와서는 한 박자씩 멈춰 섰다)
+    if(M.repath<=0 || M.pi>=M.path.length){ M.path=astar(mt,pt); M.pi=0; M.repath=0.35; }
   } else if(M.state==='break'){
     if(!M.plank||planks.indexOf(M.plank)<0){ M.plank=null; M.state='chase'; M.repath=0; }
     else{
@@ -1406,14 +1418,27 @@ function updateMonster(dt){
 
 function moveMonster(dt){
   const M=monster;
+  // 추격 중 같은 칸·바로 옆 칸이면 칸 중심이 아니라 플레이어에게 곧장 덮친다
+  if(M.state==='chase'){
+    const mt=w2t(M.x,M.y), pt=w2t(player.x,player.y);
+    if(Math.abs(mt[0]-pt[0])+Math.abs(mt[1]-pt[1])<=1 && !plankAt(pt[0],pt[1])){
+      let sp=SPD_CHASE+(M.enraged?ENRAGE:0);
+      if(M.summoned>0) sp*=1.08;
+      if(M.tired>6) sp*=Math.max(0.80, 1-(M.tired-6)*0.05);
+      const ddx=player.x-M.x, ddy=player.y-M.y, dd=Math.hypot(ddx,ddy);
+      if(dd>0.5){ const st=Math.min(dd, sp*dt); M.x+=ddx/dd*st; M.y+=ddy/dd*st;
+        if(Math.abs(ddx)>0.3) M.flip=ddx<0; M.mx=ddx; M.my=ddy; M.anim=(M.anim||0)+dt*9; }
+      return;
+    }
+  }
   if(M.pi>=M.path.length) return;
   const nx=M.path[M.pi];
   const pl=plankAt(nx[0],nx[1]);
   if(pl){ M.plank=pl; M.state='break'; M.ptimer=0.25; return; }
   const [gx,gy]=tw(nx[0],nx[1]);
-  let sp=(M.state==='chase'?SPD_CHASE:SPD_PATROL)+(M.enraged?ENRAGE:0);
-  if(M.summoned>0) sp*=1.15;
-  if(M.tired>5) sp*=Math.max(0.70, 1-(M.tired-5)*0.08);
+  let sp=(M.state==='chase'?SPD_CHASE:M.state==='search'?SPD_SEARCH:SPD_PATROL)+(M.enraged?ENRAGE:0);
+  if(M.summoned>0) sp*=1.08;
+  if(M.tired>6) sp*=Math.max(0.80, 1-(M.tired-6)*0.05);   // 8초 넘게 쫓으면 숨이 차서 걷기보다 조금 느려진다
   const ddx=gx-M.x, ddy=gy-M.y, dd=Math.hypot(ddx,ddy);
   if(Math.abs(ddx)>0.3) M.flip=ddx<0;
   if(dd>0.3){ M.mx=ddx; M.my=ddy; M.anim=(M.anim||0)+dt*(M.state==='chase'?9:6); }
@@ -1424,7 +1449,7 @@ function moveMonster(dt){
 function touchPlayer(){
   const M=monster;
   if(Math.hypot(player.x-M.x,player.y-M.y)<10*K && player.inv<=0){
-    player.hp--; player.inv=2.2; M.stagger=1.1; sHurt(); shake=1; flash=1; fxHit(); stats.hits++;
+    player.hp--; player.inv=2.2; M.stagger=1.8; sHurt(); shake=1; flash=1; fxHit(); stats.hits++;
     const n=Math.hypot(player.x-M.x,player.y-M.y)||1;
     player.knock=0.2; player.kx=(player.x-M.x)/n*140*K; player.ky=(player.y-M.y)/n*140*K;
     if(player.hp<=0) lose();
